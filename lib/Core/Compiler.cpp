@@ -45,6 +45,7 @@
 #include "rsDefines.h"
 
 #include <string>
+#include <set>
 
 using namespace bcc;
 
@@ -326,8 +327,8 @@ bool Compiler::addInternalizeSymbolsPass(Script &pScript, llvm::legacy::PassMana
     return false;
   }
 
-  // The vector contains the symbols that should not be internalized.
-  std::vector<const char *> export_symbols;
+  // Set of symbols that should not be internalized.
+  std::set<std::string> export_symbols;
 
   const char *sf[] = {
     kRoot,               // Graphics drawing function or compute kernel.
@@ -344,7 +345,7 @@ bool Compiler::addInternalizeSymbolsPass(Script &pScript, llvm::legacy::PassMana
   const char **special_functions = sf;
   // Special RS functions should always be global symbols.
   while (*special_functions != nullptr) {
-    export_symbols.push_back(*special_functions);
+    export_symbols.insert(*special_functions);
     special_functions++;
   }
 
@@ -361,11 +362,11 @@ bool Compiler::addInternalizeSymbolsPass(Script &pScript, llvm::legacy::PassMana
   size_t i;
 
   for (i = 0; i < exportVarCount; ++i) {
-    export_symbols.push_back(exportVarNameList[i]);
+    export_symbols.insert(exportVarNameList[i]);
   }
 
   for (i = 0; i < exportFuncCount; ++i) {
-    export_symbols.push_back(exportFuncNameList[i]);
+    export_symbols.insert(exportFuncNameList[i]);
   }
 
   // Expanded foreach functions should not be internalized; nor should
@@ -394,18 +395,14 @@ bool Compiler::addInternalizeSymbolsPass(Script &pScript, llvm::legacy::PassMana
   }
 
   for (auto &symbol_name : keep_funcs) {
-    export_symbols.push_back(symbol_name.c_str());
+    export_symbols.insert(symbol_name);
   }
 
-  // http://b/26165616 - WAR for this bug defines the __truncxfhf2 function in
-  // frameworks/rs/driver/runtime.  Don't internalize this function for x86, so
-  // that a script can find and link against it.
-  llvm::Triple triple(getTargetMachine().getTargetTriple());
-  if (triple.getArch() == llvm::Triple::x86) {
-    export_symbols.push_back("__truncxfhf2");
-  }
+  auto IsExportedSymbol = [=](const llvm::GlobalValue &GV) {
+    return export_symbols.count(GV.getName()) > 0;
+  };
 
-  pPM.add(llvm::createInternalizePass(export_symbols));
+  pPM.add(llvm::createInternalizePass(IsExportedSymbol));
 
   return true;
 }
